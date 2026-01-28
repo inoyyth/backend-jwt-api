@@ -1,18 +1,23 @@
 use std::collections::HashMap;
 
-use axum::extract::{Path, Query};
-use axum::{Extension, Json, http::StatusCode};
-use bcrypt::hash;
-use serde::Deserialize;
-use serde_json::{Value, json};
-use sqlx::MySqlPool;
-
 use crate::handlers::upload_handler::upload_cloudinary;
 use crate::models::user::User;
 use crate::schemas::user_schema::{
     Pagination, UserResponse, UserStoreRequest, UserStoreResponse, UserUpdateRequest,
 };
 use crate::utils::response::ApiResponse;
+use axum::extract::{Path, Query};
+use axum::http::HeaderMap;
+use axum::{Extension, Json, http::StatusCode};
+use bcrypt::hash;
+use reqwest::Client;
+use reqwest::header::{
+    ACCEPT, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE, COOKIE, UPGRADE_INSECURE_REQUESTS,
+    USER_AGENT,
+};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use sqlx::MySqlPool;
 use validator::Validate;
 
 #[derive(Deserialize, Debug)]
@@ -542,5 +547,206 @@ pub async fn delete(
         // kirim response 200 OK
         StatusCode::OK,
         Json(ApiResponse::success("User berhasil dihapus", json!(null))),
+    )
+}
+
+pub async fn api_multiple_order(
+    headers: HeaderMap,
+    Json(_payload): Json<UserStoreRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let client_ip = headers
+        .get("CF-Connecting-IP")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_else(|| "");
+
+    println!("Client IP: {}", client_ip);
+
+    let client = Client::new();
+    let url = "https://logammulia.com/add-to-cart-multiple";
+    let payload = json!({
+      "token": "7HnPzXwuH42z2rkxPZG02hTrPPGJndkJ09uE9M7m",
+      "id_variant": [
+      11, 12, 13, 15, 17, 18, 19, 20, 38, 57, 58, 59
+      ],
+      "qty": [
+      0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0
+      ],
+      "grand_total": 0,
+      "tax_type": "PPH22",
+      "tax_rate_npwp": 0,
+      "tax_rate_non_npwp": 0,
+      "tax_number": "on",
+      "ppn_rate": 12,
+      "dpp_rate": 0.91666666666667,
+      "hemat_brankas": 10,
+      "current_url": "https://logammulia.com/id/purchase/gold"
+    });
+
+    let res = match client
+        .post(url)
+        .header("XSRF-TOKEN", "eyJpdiI6ImU0dnBUOTdFWEV4VlkxdkJhaDRYNHc9PSIsInZhbHVlIjoiRVQ5bWFUMnQrSE8yWnlOcFwvME85NDdwTzNRUlkxazFqdU9vMkZwM040dzVPXC91bFJqT2IwcHJPY04rTnFcL1RqcVltRVZtSWV3a1wvNUZrbCtYM3Azb3J3PT0iLCJtYWMiOiJkNzM1NDdkOTNjZjYyZWNlNzcwZTJjZjU1MjBjZDYyZGQ3MDQ3YjUxMjE5YTgwYzYxYTM1NWRhZGI3OTk5MmU1In0%3D")
+        .header("X-CSRF-TOKEN", "eyJpdiI6ImU0dnBUOTdFWEV4VlkxdkJhaDRYNHc9PSIsInZhbHVlIjoiRVQ5bWFUMnQrSE8yWnlOcFwvME85NDdwTzNRUlkxazFqdU9vMkZwM040dzVPXC91bFJqT2IwcHJPY04rTnFcL1RqcVltRVZtSWV3a1wvNUZrbCtYM3Azb3J3PT0iLCJtYWMiOiJkNzM1NDdkOTNjZjYyZWNlNzcwZTJjZjU1MjBjZDYyZGQ3MDQ3YjUxMjE5YTgwYzYxYTM1NWRhZGI3OTk5MmU1In0%3D")
+        .header("CF-Connecting-IP", client_ip)
+        .header(USER_AGENT, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header(ACCEPT, "application/json, text/plain, */*")
+        .header(ACCEPT_LANGUAGE, "en-US,en;q=0.9,id;q=0.8")
+        .header(CONNECTION, "keep-alive")
+        .header(UPGRADE_INSECURE_REQUESTS, "1")
+        .header("sec-fetch-dest", "empty")
+        .header("sec-fetch-mode", "cors")
+        .header("sec-fetch-site", "same-origin")
+        .header("sec-fetch-user", "?1")
+        .header("sec-ch-ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+        .header("sec-ch-ua-mobile", "?0")
+        .header("sec-ch-ua-platform", "\"macOS\"")
+        .header(CONTENT_TYPE, "application/json")
+        .header(COOKIE, "_tt_enable_cookie=1; _ttp=01KF15YYP1KMQZY1JMTB010KF1_.tt.1; _hjSessionUser_1121314=eyJpZCI6IjIwMjZhNGU3LTYxNzYtNTdjYi05ZDE1LWE2NDkyMzdhYjM5ZSIsImNyZWF0ZWQiOjE3Njg0OTI1OTU5OTEsImV4aXN0aW5nIjp0cnVlfQ==; _fbp=fb.1.1768909651234.661177438798122095; _gid=GA1.2.1912491256.1769503912; _ga_EGQK4VRL7Y=GS2.1.s1769585850$o6$g0$t1769585852$j58$l0$h0; remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d=eyJpdiI6IkFacktZWFZuZTlXY3IxWmwrZjRSYUE9PSIsInZhbHVlIjoidzVNUHU3U1JFeWF1UDJ2a2FETzBocVRIbHk0bWN2UGdMVTFUb2krc3Z0NUpMQjJnZ2xOM2lVT2psalFucExaMTRRMVlyTjJyS0ExMkdMenU3MHN6bnA2WWo3dVwvSUFMSk53Q0R1RW14VE9GMlkzc3VLUFE1RDEzUXArY2NlYmY0MzQ5eGRcL0pzaXZCMXpyUG1Xd0d2SEYxcmdcL3FPUEx2MlQzVEU3XC91NytSV3Fmb0dXa0hvTE9sZjU4T2hyYWpCUCIsIm1hYyI6ImM4MTE4MWNiYzExMGNjNGU0OTg1YjNkZjE5YmE5OTg3ZmMzOGIwYjcxNjVlODExYzQwMzE5OTMxMTYzZDU5OTQifQ%3D%3D; logammulia_session=YhtoTvlz9Y1yTLpFrkhRpaW1YhzBxjbXaueCbWCk; cf_clearance=mF8snC1cAWK2gXnl.wqU.8WyScMULWCc9fSTIud8VAk-1769605542-1.2.1.1-o9fdYOEUP6CGTmqF4OIhhLmqW_sjxKgza2cW6a6o9DBR2WwiWZd2kskiOCnTK5O.zlp7Yckee84VsNwQ1FvxHOEPCHnUe4bC9EWUWrde565vnRqdV.44HWQSWi5J3Oc1cJZN4tKomjmsYHejOv0Il8VdVUau.luRt1Ln_4T27Q8lnQ23zNm5vq6qHk2j5ZXnKJ6XzJ.7hLkykw2KsJ7D5VHdG7eb9aSVyXMB0eNf6UE; _hjSession_1121314=eyJpZCI6IjNhYjVlZjRhLTJhYjMtNGU4ZS1hNzUyLThlNmI2MGRhNzM5ZCIsImMiOjE3Njk2MDU1NDI2NTcsInMiOjAsInIiOjAsInNiIjowLCJzciI6MCwic2UiOjAsImZzIjowLCJzcCI6MH0=; _ga=GA1.1.1969594460.1768492596; _ga_8XC1TTYW3C=GS2.1.s1769605542$o9$g1$t1769605626$j59$l0$h221986024; XSRF-TOKEN=eyJpdiI6IkR0Vkg5SjV6Tlo0QjNSWmNLbW81YVE9PSIsInZhbHVlIjoiTUFGOFU4R05FMXNLdmk3YkVEcDB0d2Z5V1g4NlQ5NjUybHNnUGk1OHVvRnRlZUczRlhUZ1wvWStrbmRMWDVBcGdaQlloZU1lTlljeFgrQ3RlSkJUWkdBPT0iLCJtYWMiOiI0NjM0YmFiZDAyNmExOWIzYjJlNmRiMDM4YTM4NWQ3NWM2OWI0MWFlZDY2MmQ3YzA2NzAxMWRkOTE0NGU1ZThmIn0%3D; _gcl_au=1.1.516091693.1768492596.1324170914.1769605616.1769605689; ttcsid_CR39QRJC77U85A2HF4A0=1769605542528::4mn2IR-jVFn397DIQ2EY.7.1769605689760.1; ttcsid=1769605542532::Pq1nJzltw4XsGheJnNRY.7.1769605689760.0")
+        .json(&payload)
+        .send()
+        .await
+    {
+        Ok(res) => {
+            println!("✅ Request successful!");
+            println!("Status: {}", res.status());
+            println!("Headers: {:?}", res.headers());
+            res
+        },
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to make request: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    let body = match res.text().await {
+        Ok(body) => body,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to read response: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    println!("📄 Response Body: {}", body);
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success(
+            "External API called successfully",
+            json!(body),
+        )),
+    )
+}
+
+pub async fn api_change_profile(
+    headers: HeaderMap,
+    Json(_payload): Json<UserStoreRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let client_ip = headers
+        .get("CF-Connecting-IP")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_else(|| "");
+
+    println!("Client IP: {}", client_ip);
+
+    let client = Client::new();
+    let url = "https://logammulia.com/my-account";
+    let payload = json!({
+      "field_post": "all_field",
+      "go_checkout": 0,
+      "_token": "7HnPzXwuH42z2rkxPZG02hTrPPGJndkJ09uE9M7m",
+      "full_name": "Supriyadin",
+      "tax_name_profile": "SUPRIYADIN",
+      "email": "supri170845@gmail.com",
+      "mobile_phone": "087889911369",
+      "identity_number": "3172030907880011",
+      "birth_place": "Jakarta",
+      "birth_date": "1988-07-09",
+      "sumber_dana": "Usaha",
+      "tujuan_transaksi": "Investasi",
+      "jobs": "KARYAWAN SWASTA",
+      "code_bank": "008",
+      "bank_code": "BANK MANDIRI (PERSERO)",
+      "rekening_number": "1260007117582",
+      "rekening_name": "SUPRIYADIN",
+      "income_value": "10 Juta - 25 Juta Rupiah",
+      "id_country": 1,
+      "full_name_billing_address": "Supriyadin",
+      "mobile_phone_billing_address": "087889911369",
+      "province": 11,
+      "city": 8783,
+      "zip_code": "10640",
+      "address": "Jl intanbaiduri no.17 rt:001/003 Sumur batu kec. Kemayoran Jakarta pusat"
+    });
+
+    let res = match client
+        .post(url)
+        .header("XSRF-TOKEN", "eyJpdiI6ImU0dnBUOTdFWEV4VlkxdkJhaDRYNHc9PSIsInZhbHVlIjoiRVQ5bWFUMnQrSE8yWnlOcFwvME85NDdwTzNRUlkxazFqdU9vMkZwM040dzVPXC91bFJqT2IwcHJPY04rTnFcL1RqcVltRVZtSWV3a1wvNUZrbCtYM3Azb3J3PT0iLCJtYWMiOiJkNzM1NDdkOTNjZjYyZWNlNzcwZTJjZjU1MjBjZDYyZGQ3MDQ3YjUxMjE5YTgwYzYxYTM1NWRhZGI3OTk5MmU1In0%3D")
+        .header("X-CSRF-TOKEN", "eyJpdiI6ImU0dnBUOTdFWEV4VlkxdkJhaDRYNHc9PSIsInZhbHVlIjoiRVQ5bWFUMnQrSE8yWnlOcFwvME85NDdwTzNRUlkxazFqdU9vMkZwM040dzVPXC91bFJqT2IwcHJPY04rTnFcL1RqcVltRVZtSWV3a1wvNUZrbCtYM3Azb3J3PT0iLCJtYWMiOiJkNzM1NDdkOTNjZjYyZWNlNzcwZTJjZjU1MjBjZDYyZGQ3MDQ3YjUxMjE5YTgwYzYxYTM1NWRhZGI3OTk5MmU1In0%3D")
+        .header("CF-Connecting-IP", client_ip)
+        .header(USER_AGENT, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header(ACCEPT, "application/json, text/plain, */*")
+        .header(ACCEPT_LANGUAGE, "en-US,en;q=0.9,id;q=0.8")
+        .header(CONNECTION, "keep-alive")
+        .header(UPGRADE_INSECURE_REQUESTS, "1")
+        .header("sec-fetch-dest", "empty")
+        .header("sec-fetch-mode", "cors")
+        .header("sec-fetch-site", "same-origin")
+        .header("sec-fetch-user", "?1")
+        .header("sec-ch-ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+        .header("sec-ch-ua-mobile", "?0")
+        .header("sec-ch-ua-platform", "\"macOS\"")
+        .header(CONTENT_TYPE, "application/json")
+        .header(COOKIE, "_tt_enable_cookie=1; _ttp=01KF15YYP1KMQZY1JMTB010KF1_.tt.1; _hjSessionUser_1121314=eyJpZCI6IjIwMjZhNGU3LTYxNzYtNTdjYi05ZDE1LWE2NDkyMzdhYjM5ZSIsImNyZWF0ZWQiOjE3Njg0OTI1OTU5OTEsImV4aXN0aW5nIjp0cnVlfQ==; _fbp=fb.1.1768909651234.661177438798122095; _gid=GA1.2.1912491256.1769503912; _ga_EGQK4VRL7Y=GS2.1.s1769585850$o6$g0$t1769585852$j58$l0$h0; remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d=eyJpdiI6IkFacktZWFZuZTlXY3IxWmwrZjRSYUE9PSIsInZhbHVlIjoidzVNUHU3U1JFeWF1UDJ2a2FETzBocVRIbHk0bWN2UGdMVTFUb2krc3Z0NUpMQjJnZ2xOM2lVT2psalFucExaMTRRMVlyTjJyS0ExMkdMenU3MHN6bnA2WWo3dVwvSUFMSk53Q0R1RW14VE9GMlkzc3VLUFE1RDEzUXArY2NlYmY0MzQ5eGRcL0pzaXZCMXpyUG1Xd0d2SEYxcmdcL3FPUEx2MlQzVEU3XC91NytSV3Fmb0dXa0hvTE9sZjU4T2hyYWpCUCIsIm1hYyI6ImM4MTE4MWNiYzExMGNjNGU0OTg1YjNkZjE5YmE5OTg3ZmMzOGIwYjcxNjVlODExYzQwMzE5OTMxMTYzZDU5OTQifQ%3D%3D; logammulia_session=YhtoTvlz9Y1yTLpFrkhRpaW1YhzBxjbXaueCbWCk; cf_clearance=mF8snC1cAWK2gXnl.wqU.8WyScMULWCc9fSTIud8VAk-1769605542-1.2.1.1-o9fdYOEUP6CGTmqF4OIhhLmqW_sjxKgza2cW6a6o9DBR2WwiWZd2kskiOCnTK5O.zlp7Yckee84VsNwQ1FvxHOEPCHnUe4bC9EWUWrde565vnRqdV.44HWQSWi5J3Oc1cJZN4tKomjmsYHejOv0Il8VdVUau.luRt1Ln_4T27Q8lnQ23zNm5vq6qHk2j5ZXnKJ6XzJ.7hLkykw2KsJ7D5VHdG7eb9aSVyXMB0eNf6UE; _hjSession_1121314=eyJpZCI6IjNhYjVlZjRhLTJhYjMtNGU4ZS1hNzUyLThlNmI2MGRhNzM5ZCIsImMiOjE3Njk2MDU1NDI2NTcsInMiOjAsInIiOjAsInNiIjowLCJzciI6MCwic2UiOjAsImZzIjowLCJzcCI6MH0=; _ga=GA1.1.1969594460.1768492596; _ga_8XC1TTYW3C=GS2.1.s1769605542$o9$g1$t1769605626$j59$l0$h221986024; XSRF-TOKEN=eyJpdiI6IkR0Vkg5SjV6Tlo0QjNSWmNLbW81YVE9PSIsInZhbHVlIjoiTUFGOFU4R05FMXNLdmk3YkVEcDB0d2Z5V1g4NlQ5NjUybHNnUGk1OHVvRnRlZUczRlhUZ1wvWStrbmRMWDVBcGdaQlloZU1lTlljeFgrQ3RlSkJUWkdBPT0iLCJtYWMiOiI0NjM0YmFiZDAyNmExOWIzYjJlNmRiMDM4YTM4NWQ3NWM2OWI0MWFlZDY2MmQ3YzA2NzAxMWRkOTE0NGU1ZThmIn0%3D; _gcl_au=1.1.516091693.1768492596.1324170914.1769605616.1769605689; ttcsid_CR39QRJC77U85A2HF4A0=1769605542528::4mn2IR-jVFn397DIQ2EY.7.1769605689760.1; ttcsid=1769605542532::Pq1nJzltw4XsGheJnNRY.7.1769605689760.0")
+        .json(&payload)
+        .send()
+        .await
+    {
+        Ok(res) => {
+            println!("✅ Request successful!");
+            println!("Status: {}", res.status());
+            println!("Headers: {:?}", res.headers());
+            res
+        },
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to make request: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    let body = match res.text().await {
+        Ok(body) => body,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to read response: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    println!("📄 Response Body: {}", body);
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success(
+            "External API called successfully",
+            json!(body),
+        )),
     )
 }

@@ -11,5 +11,10 @@ pub fn user_routes() -> Router {
         .route("/user/{id}", get(user_handler::show))
         .route("/user/{id}", put(user_handler::update))
         .route("/user/{id}", delete(user_handler::delete))
+        .route("/user/api-external", post(user_handler::api_multiple_order))
+        .route(
+            "/user/api-change-profile",
+            post(user_handler::api_change_profile),
+        )
         .layer(middleware::from_fn(auth))
 }
