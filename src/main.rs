@@ -38,7 +38,7 @@ async fn main() {
     let port = env::var("APP_PORT")
         .ok()
         .and_then(|port| port.parse::<u16>().ok())
-        .unwrap_or(3001);
+        .unwrap_or(3000);
 
     // sever address
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

@@ -37,6 +37,7 @@ pub struct UserUpdateRequest {
     #[validate(email(message = "Email tidak valid"))]
     pub email: String,
     pub password: Option<String>,
+    pub image: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,4 +62,11 @@ pub struct Pagination {
 pub struct UserResponse {
     pub data: Vec<UserStoreResponse>,
     pub pagination: Pagination,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserQuery {
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+    pub keyword: Option<String>,
 }
