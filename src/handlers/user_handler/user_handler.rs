@@ -400,7 +400,7 @@ pub async fn update(
 
     //check if image is not empty
     let image_cloudinary: Option<String> = if let Some(image) = &payload.image {
-        if !image.is_empty() {
+        if !image.is_empty() && !image.contains("http") {
             let image_path = upload_cloudinary(image.clone()).await.unwrap();
             println!("Image path: {:#?}", image_path);
             Some(image_path.secure_url.clone())
@@ -446,9 +446,10 @@ pub async fn update(
         _ => {
             // Update user tanpa password
             sqlx::query!(
-                "UPDATE users SET name = ?, email = ? WHERE id = ?",
+                "UPDATE users SET name = ?, email = ?, image = ? WHERE id = ?",
                 payload.name,
                 payload.email,
+                image_cloudinary,
                 id
             )
             .execute(&db)
