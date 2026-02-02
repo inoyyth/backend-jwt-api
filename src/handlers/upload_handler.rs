@@ -90,3 +90,23 @@ pub fn decode_image(data_url: &str) -> (String, Vec<u8>) {
     // return mime type and base64 data
     (mime.to_string(), bytes)
 }
+
+// upload image base6 to folder
+pub fn upload_image_to_folder(image: &str) -> String {
+    let image_path = if !image.is_empty() {
+        let (mime, image_data) = decode_image(image);
+        let image_path = format!(
+            "./uploads/{}.{}",
+            Utc::now().timestamp(),
+            mime.split('/').last().unwrap()
+        );
+        println!("Image path: {}", image_path);
+        std::fs::create_dir_all("./uploads").unwrap();
+        std::fs::write(&image_path, image_data).unwrap();
+        image_path
+    } else {
+        "".to_string()
+    };
+
+    image_path.to_string()
+}

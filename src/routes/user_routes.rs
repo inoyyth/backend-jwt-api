@@ -16,5 +16,7 @@ pub fn user_routes() -> Router {
             "/user/api-change-profile",
             post(user_handler::api_change_profile),
         )
+        .route("/user/export-excel", get(user_handler::export_excel))
+        .route("/user/export-csv", get(user_handler::export_csv))
         .layer(middleware::from_fn(auth))
 }

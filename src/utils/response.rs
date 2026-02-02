@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ApiResponse<T> {
     pub status: bool,
     pub message: String,

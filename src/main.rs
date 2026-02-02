@@ -32,6 +32,7 @@ async fn main() {
     let app = Router::new()
         .merge(routes::auth_routes::auth_routes())
         .merge(routes::user_routes::user_routes())
+        .merge(routes::document_routes::document_routes())
         .layer(Extension(db))
         .layer(cors);
 

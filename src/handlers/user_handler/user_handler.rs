@@ -1,20 +1,25 @@
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufWriter;
 
 use crate::handlers::upload_handler::upload_cloudinary;
 use crate::models::user::User;
 use crate::schemas::user_schema::{
     Pagination, UserQuery, UserResponse, UserStoreRequest, UserStoreResponse, UserUpdateRequest,
 };
+use crate::utils::password::hash_password;
 use crate::utils::response::ApiResponse;
 use axum::extract::{Path, Query};
-use axum::http::HeaderMap;
-use axum::{Extension, Json, http::StatusCode};
-use bcrypt::hash;
+use axum::http::{HeaderMap, StatusCode};
+use axum::{Extension, Json, body::Body, response::Response};
+use csv::Writer;
 use reqwest::Client;
 use reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE, COOKIE, UPGRADE_INSECURE_REQUESTS,
     USER_AGENT,
 };
+use rust_xlsxwriter::workbook::Workbook;
+use rust_xlsxwriter::{Color, Format, FormatAlign, FormatBorder};
 use serde_json::{Value, json};
 use sqlx::MySqlPool;
 use validator::Validate;
@@ -58,7 +63,7 @@ pub async fn index(
         ",
         format!("%{}%", keyword),
         limit,
-        offset
+        offset,
     )
     .fetch_all(&db)
     .await
@@ -172,27 +177,7 @@ pub async fn store(
         None
     };
 
-    // // upload image base6 to folder
-    // let image_path = if let Some(image) = &payload.image {
-    //     if !image.is_empty() {
-    //         let (mime, image_data) = decode_image(image);
-    //         let image_path = format!(
-    //             "./uploads/{}.{}",
-    //             Utc::now().timestamp(),
-    //             mime.split('/').last().unwrap()
-    //         );
-    //         println!("Image path: {}", image_path);
-    //         std::fs::create_dir_all("./uploads").unwrap();
-    //         std::fs::write(&image_path, image_data).unwrap();
-    //         image_path
-    //     } else {
-    //         "".to_string()
-    //     }
-    // } else {
-    //     "".to_string()
-    // };
-
-    // println!("Image path: {}", image_path);
+    let hashed = hash_password(&payload.password);
 
     // insert data user to database
     let result = sqlx::query!(
@@ -200,7 +185,7 @@ pub async fn store(
         payload.name,
         payload.email,
         image_cloudinary,
-        payload.password
+        hashed.unwrap()
     )
     .execute(&db)
     .await;
@@ -351,7 +336,7 @@ pub async fn update(
     // check if is user is exist
     let user_exist = match sqlx::query!(
         "
-        SELECT id
+        SELECT id, image
         FROM users
         WHERE id = ?
         AND deleted_at IS NULL
@@ -405,28 +390,17 @@ pub async fn update(
             println!("Image path: {:#?}", image_path);
             Some(image_path.secure_url.clone())
         } else {
-            None
+            user_exist.image
         }
     } else {
-        None
+        user_exist.image
     };
 
     // update user
     let result = match &payload.password {
         Some(password) if !password.is_empty() => {
             // Hash password with bcrypt
-            let hashed = match hash(password, 10) {
-                Ok(hashed) => hashed,
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiResponse::error(&format!(
-                            "Failed to hash password: {}",
-                            e
-                        ))),
-                    );
-                }
-            };
+            let hashed = hash_password(password);
             // Update user with hashed password
             sqlx::query!(
                 "
@@ -436,7 +410,7 @@ pub async fn update(
                 ",
                 payload.name,
                 payload.email,
-                hashed,
+                hashed.unwrap(),
                 image_cloudinary,
                 id
             )
@@ -759,4 +733,345 @@ pub async fn api_change_profile(
             json!(body),
         )),
     )
+}
+
+pub async fn export_excel(
+    Extension(db): Extension<MySqlPool>,
+    Query(query): Query<UserQuery>,
+) -> Result<Response<Body>, (StatusCode, Json<ApiResponse<Value>>)> {
+    let page: i64 = query.page.unwrap_or(1);
+    let limit: i64 = query.limit.unwrap_or(10);
+    let keyword: String = query.keyword.unwrap_or("".to_string());
+    let offset = if page > 1 { (page - 1) * limit } else { 0 };
+
+    // get all users data (no pagination for export)
+    let users = match sqlx::query_as!(
+        User,
+        "
+        SELECT id, name, email, password, image, created_at, updated_at, deleted_at
+        FROM users
+        WHERE name LIKE ?
+        AND deleted_at IS NULL
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        ",
+        format!("%{}%", keyword),
+        limit,
+        offset
+    )
+    .fetch_all(&db)
+    .await
+    {
+        Ok(users) => users,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!("Failed to fetch users: {}", e))),
+            ));
+        }
+    };
+
+    let mut workbook = Workbook::new();
+
+    // Create formats
+    let header_format = Format::new()
+        .set_bold()
+        .set_border(FormatBorder::Thin)
+        .set_background_color(Color::RGB(0xE6E6FA))
+        .set_align(FormatAlign::Center);
+
+    // Add worksheet
+    let worksheet = workbook.add_worksheet();
+
+    // Set column widths
+    let _ = worksheet.set_column_width(0, 10); // ID
+    let _ = worksheet.set_column_width(1, 30); // Name
+    let _ = worksheet.set_column_width(2, 40); // Email
+    let _ = worksheet.set_column_width(3, 20); // Created At
+    let _ = worksheet.set_column_width(4, 20); // Updated At
+
+    // Write headers
+    worksheet
+        .write_with_format(0, 0, "ID", &header_format)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write headers: {}",
+                    e
+                ))),
+            )
+        })?;
+    worksheet
+        .write_with_format(0, 1, "Name", &header_format)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write headers: {}",
+                    e
+                ))),
+            )
+        })?;
+    worksheet
+        .write_with_format(0, 2, "Email", &header_format)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write headers: {}",
+                    e
+                ))),
+            )
+        })?;
+    worksheet
+        .write_with_format(0, 3, "Created At", &header_format)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write headers: {}",
+                    e
+                ))),
+            )
+        })?;
+    worksheet
+        .write_with_format(0, 4, "Updated At", &header_format)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write headers: {}",
+                    e
+                ))),
+            )
+        })?;
+
+    // Write data
+    for (row, user) in users.iter().enumerate() {
+        let row_num: u32 = (row + 1) as u32;
+        worksheet.write(row_num, 0, user.id).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write user data: {}",
+                    e
+                ))),
+            )
+        })?;
+        worksheet.write(row_num, 1, &user.name).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write user data: {}",
+                    e
+                ))),
+            )
+        })?;
+        worksheet.write(row_num, 2, &user.email).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write user data: {}",
+                    e
+                ))),
+            )
+        })?;
+
+        let created_at_str = user
+            .created_at
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "N/A".to_string());
+        worksheet.write(row_num, 3, &created_at_str).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write user data: {}",
+                    e
+                ))),
+            )
+        })?;
+
+        let updated_at_str = user
+            .updated_at
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "N/A".to_string());
+        worksheet.write(row_num, 4, &updated_at_str).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write user data: {}",
+                    e
+                ))),
+            )
+        })?;
+    }
+
+    // workbook.save("test.xlsx").map_err(|e| {
+    //     (
+    //         StatusCode::INTERNAL_SERVER_ERROR,
+    //         Json(ApiResponse::error(&format!(
+    //             "Failed to save Excel file: {}",
+    //             e
+    //         ))),
+    //     )
+    // })?;
+
+    // Generate Excel file in memory
+    let buffer = workbook.save_to_buffer().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(&format!(
+                "Failed to generate Excel file: {}",
+                e
+            ))),
+        )
+    })?;
+
+    // Create response with proper headers for file download
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .header(
+            "Content-Disposition",
+            "attachment; filename=\"users_export.xlsx\"",
+        )
+        .header("Content-Length", buffer.len())
+        .body(Body::from(buffer))
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to create response: {}",
+                    e
+                ))),
+            )
+        })?;
+
+    Ok(response)
+}
+
+pub async fn export_csv(
+    Extension(db): Extension<MySqlPool>,
+    Query(query): Query<UserQuery>,
+) -> Result<Response<Body>, (StatusCode, Json<ApiResponse<Value>>)> {
+    let page: i64 = query.page.unwrap_or(1);
+    let limit: i64 = query.limit.unwrap_or(10);
+    let keyword: String = query.keyword.unwrap_or("".to_string());
+    let offset = if page > 1 { (page - 1) * limit } else { 0 };
+
+    // get all users data (no pagination for export)
+    let users = match sqlx::query_as!(
+        User,
+        "
+        SELECT id, name, email, password, image, created_at, updated_at, deleted_at
+        FROM users
+        WHERE name LIKE ?
+        AND deleted_at IS NULL
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        ",
+        format!("%{}%", keyword),
+        limit,
+        offset
+    )
+    .fetch_all(&db)
+    .await
+    {
+        Ok(users) => users,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!("Failed to fetch users: {}", e))),
+            ));
+        }
+    };
+
+    let file = File::create("users.csv").map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(&format!(
+                "Failed to create CSV file: {}",
+                e
+            ))),
+        )
+    })?;
+    let mut wtr = Writer::from_writer(file);
+
+    // Write CSV header
+    wtr.write_record(&["ID", "Name", "Email", "Password", "Image"])
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write CSV header: {}",
+                    e
+                ))),
+            )
+        })?;
+
+    // Write CSV data
+    for user in users {
+        wtr.write_record(&[
+            user.id.to_string(),
+            user.name.clone(),
+            user.email.clone(),
+            user.password.clone(),
+            user.image.clone().unwrap_or_default(),
+        ])
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to write CSV data: {}",
+                    e
+                ))),
+            )
+        })?;
+    }
+
+    wtr.flush().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(&format!(
+                "Failed to flush CSV writer: {}",
+                e
+            ))),
+        )
+    })?;
+
+    // Read the CSV file and return as download
+    let csv_content = std::fs::read("users.csv").map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(&format!(
+                "Failed to read CSV file: {}",
+                e
+            ))),
+        )
+    })?;
+
+    // Return the CSV file as response
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/csv")
+        .header(
+            "Content-Disposition",
+            "attachment; filename=\"users_export.csv\"",
+        )
+        .body(Body::from(csv_content))
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to create response: {}",
+                    e
+                ))),
+            )
+        })?;
+
+    Ok(response)
 }
