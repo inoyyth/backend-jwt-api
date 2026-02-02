@@ -31,7 +31,11 @@ pub async fn complete_upload(
     axum::Json(payload): axum::Json<CompletePayload>,
 ) -> impl IntoResponse {
     let dir = format!("uploads/{}", payload.file_id);
-    let output_path = format!("uploads/{}", snake_case(&payload.name));
+    let output_path = format!(
+        "uploads/{}.{}",
+        snake_case(&payload.name),
+        payload.extention
+    );
 
     println!("dir: {}", dir);
     println!("output_path: {}", output_path);
