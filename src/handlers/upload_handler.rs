@@ -5,14 +5,20 @@ use reqwest::multipart;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::env;
-
+use tokio::fs::File;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CloudinaryResponse {
     pub public_id: String,
     pub secure_url: String,
-    pub width: u32,
-    pub height: u32,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub format: String,
+}
+
+#[derive(Debug)]
+enum StringOrFile {
+    Str(String),
+    File(File),
 }
 
 fn generate_signature(params: &[(&str, String)], api_secret: &str) -> String {
@@ -31,7 +37,7 @@ fn generate_signature(params: &[(&str, String)], api_secret: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-pub async fn upload_cloudinary(
+pub async fn upload_base64_cloudinary(
     file: String,
 ) -> Result<CloudinaryResponse, Box<dyn std::error::Error>> {
     let cloud_name = env::var("CLOUDINARY_CLOUD_NAME").unwrap();
@@ -61,6 +67,98 @@ pub async fn upload_cloudinary(
         "https://api.cloudinary.com/v1_1/{}/image/upload",
         cloud_name
     );
+
+    let client = reqwest::Client::new();
+
+    let res = client.post(url).multipart(form).send().await?;
+
+    // handle error
+    if res.status().is_client_error() || res.status().is_server_error() {
+        return Err(format!("Cloudinary Error: {}", res.status()).into());
+    }
+
+    let response: CloudinaryResponse = res.json().await?;
+
+    Ok(response)
+}
+
+fn detect_file_type(bytes: &[u8]) -> String {
+    if bytes.len() < 4 {
+        return "bin".to_string();
+    }
+
+    match &bytes[0..4] {
+        [0xFF, 0xD8, 0xFF, 0xE0] | [0xFF, 0xD8, 0xFF, 0xE1] | [0xFF, 0xD8, 0xFF, 0xE8] => "jpg",
+        [0x89, 0x50, 0x4E, 0x47] => "png",
+        [0x47, 0x49, 0x46, 0x38] => "gif",
+        [0x42, 0x4D, ..] => "bmp",
+        [0x25, 0x50, 0x44, 0x46] => "pdf",
+        [0x50, 0x4B, 0x03, 0x04] | [0x50, 0x4B, 0x05, 0x06] | [0x50, 0x4B, 0x07, 0x08] => {
+            // Check if it's a DOCX or XLSX by looking at the file extension
+            // or by examining the ZIP contents
+            "zip" // For now, treat as zip - Cloudinary will handle it as file
+        }
+        [0xD0, 0xCF, 0x11, 0xE0] => "doc",
+        [0x09, 0x08, 0x10, 0x00] => "xls",
+        _ => {
+            // Check for text files by looking for printable ASCII
+            if bytes
+                .iter()
+                .take(100)
+                .all(|&b| b.is_ascii_graphic() || b.is_ascii_whitespace())
+            {
+                "txt"
+            } else {
+                "bin"
+            }
+        }
+    }
+    .to_string()
+}
+
+pub async fn upload_cloudinary(
+    mut file: File,
+) -> Result<CloudinaryResponse, Box<dyn std::error::Error>> {
+    let cloud_name = env::var("CLOUDINARY_CLOUD_NAME").unwrap();
+    let api_key = env::var("CLOUDINARY_API_KEY").unwrap();
+    let api_secret = env::var("CLOUDINARY_API_SECRET").unwrap();
+
+    let timestamp = Utc::now().timestamp();
+    let folder = "uploads/rust".to_string();
+
+    // signature = sha1("timestamp=xxx<api_secret>")
+    let signature = generate_signature(
+        &[
+            ("folder", folder.clone()),
+            ("timestamp", timestamp.clone().to_string()),
+        ],
+        &api_secret,
+    );
+
+    // Read file into bytes
+    let mut contents = Vec::new();
+    use tokio::io::AsyncReadExt;
+    file.read_to_end(&mut contents).await?;
+
+    // Detect file type by checking magic bytes
+    let file_extension = detect_file_type(&contents);
+    let is_image = matches!(
+        file_extension.as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp"
+    );
+
+    let form = multipart::Form::new()
+        .part(
+            "file",
+            multipart::Part::bytes(contents).file_name(format!("upload.{}", file_extension)),
+        )
+        .text("timestamp", timestamp.to_string())
+        .text("api_key", api_key)
+        .text("signature", signature)
+        .text("folder", folder)
+        .text("resource_type", if is_image { "image" } else { "file" });
+
+    let url = format!("https://api.cloudinary.com/v1_1/{}/auto/upload", cloud_name);
 
     let client = reqwest::Client::new();
 

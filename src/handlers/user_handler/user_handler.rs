@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::BufWriter;
 
-use crate::handlers::upload_handler::upload_cloudinary;
+use crate::handlers::upload_handler::upload_base64_cloudinary;
 use crate::models::user::User;
 use crate::schemas::user_schema::{
     Pagination, UserQuery, UserResponse, UserStoreRequest, UserStoreResponse, UserUpdateRequest,
@@ -167,7 +166,7 @@ pub async fn store(
     // upload image base64 to cloudinary
     let image_cloudinary: Option<String> = if let Some(image) = &payload.image {
         if !image.is_empty() {
-            let image_path = upload_cloudinary(image.clone()).await.unwrap();
+            let image_path = upload_base64_cloudinary(image.clone()).await.unwrap();
             println!("Image path: {:#?}", image_path);
             Some(image_path.secure_url.clone())
         } else {
@@ -386,7 +385,7 @@ pub async fn update(
     //check if image is not empty
     let image_cloudinary: Option<String> = if let Some(image) = &payload.image {
         if !image.is_empty() && !image.contains("http") {
-            let image_path = upload_cloudinary(image.clone()).await.unwrap();
+            let image_path = upload_base64_cloudinary(image.clone()).await.unwrap();
             println!("Image path: {:#?}", image_path);
             Some(image_path.secure_url.clone())
         } else {

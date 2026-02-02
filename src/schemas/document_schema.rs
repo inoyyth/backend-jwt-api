@@ -43,9 +43,11 @@ pub struct DocumentQuery {
     pub keyword: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct CompletePayload {
+    #[validate(length(min = 1, max = 255, message = "ID wajib diisi"))]
     pub file_id: String,
+    #[validate(length(min = 1, max = 255, message = "Nama wajib diisi"))]
     pub name: String,
     pub extention: String,
 }

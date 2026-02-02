@@ -1,5 +1,8 @@
-use crate::schemas::document_schema::CompletePayload;
-use axum::{extract::Multipart, response::IntoResponse};
+use crate::{
+    handlers::upload_handler::upload_cloudinary, schemas::document_schema::CompletePayload,
+};
+use axum::{Extension, extract::Multipart, response::IntoResponse};
+use sqlx::MySqlPool;
 use stringcase::snake_case;
 use tokio::{fs, io::AsyncWriteExt};
 
@@ -16,24 +19,27 @@ pub async fn upload_chunk(mut multipart: Multipart) -> impl IntoResponse {
             _ => {}
         }
     }
-
+    // // TODO: upload chunks to directory
     let dir = format!("uploads/{}", file_id);
     fs::create_dir_all(&dir).await.unwrap();
 
     let path = format!("{}/chunk_{}", dir, chunk_index);
-    let mut file = fs::File::create(path).await.unwrap();
+    let mut file = fs::File::create(&path).await.unwrap();
     file.write_all(&data).await.unwrap();
+    drop(file); // Close the file handle
 
     "Ok"
 }
 
 pub async fn complete_upload(
+    Extension(db): Extension<MySqlPool>,
     axum::Json(payload): axum::Json<CompletePayload>,
 ) -> impl IntoResponse {
     let dir = format!("uploads/{}", payload.file_id);
     let output_path = format!(
-        "uploads/{}.{}",
+        "uploads/{}-{}.{}",
         snake_case(&payload.name),
+        chrono::Local::now().timestamp().to_string(),
         payload.extention
     );
 
@@ -62,9 +68,25 @@ pub async fn complete_upload(
         output.write_all(&bytes).await.unwrap();
     }
 
-    // Clean up temporary chunk directory
+    // TODO: save to database
+
+    // TODO: upload to cloudinary
+    let file_for_upload = fs::File::open(&output_path).await.unwrap();
+    let cloudinary_response = match upload_cloudinary(file_for_upload).await {
+        Ok(response) => response,
+        Err(e) => {
+            println!("Cloudinary upload failed: {}", e);
+            return "Cloudinary upload failed".into_response();
+        }
+    };
+    // Clean up temporary chunk directory and merged file
     tokio::fs::remove_dir_all(&dir).await.unwrap();
-    println!("Cleaned up temporary directory: {}", dir);
+    tokio::fs::remove_file(&output_path).await.unwrap();
+
+    println!(
+        "Cloudinary upload successful: {}",
+        cloudinary_response.secure_url
+    );
 
     "merged".into_response()
 }
