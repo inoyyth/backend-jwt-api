@@ -2,7 +2,7 @@ use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use tokio::sync::broadcast;
 
-use crate::routes::message::{ClientMessage, ServerMessage};
+use crate::schemas::message_schema::{ClientMessage, ServerMessage};
 
 pub async fn handle_socket(
     socket: WebSocket,

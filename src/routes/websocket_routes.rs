@@ -6,7 +6,7 @@ use axum::{
 };
 use tokio::sync::broadcast;
 use crate::handlers::websocket_handler::handle_socket;
-use crate::routes::message::ServerMessage;
+use crate::schemas::message_schema::ServerMessage;
 
 pub fn websocket_routes() -> Router {
     let (tx, _rx): (broadcast::Sender<ServerMessage>, broadcast::Receiver<ServerMessage>) =
