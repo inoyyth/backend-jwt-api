@@ -1,4 +1,5 @@
 use axum::extract::ws::{Message, WebSocket};
+use chrono::Utc;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::broadcast;
 
@@ -40,12 +41,13 @@ pub async fn handle_socket(
                             Ok(msg) => match msg {
                                 ClientMessage::Join { username: name } => {
                                     username = name.clone();
-                                    let _ = tx.send(ServerMessage::UserJoined { username: name });
+                                    let _ = tx.send(ServerMessage::UserJoined { username: name, time: Some(Utc::now()) });
                                 }
                                 ClientMessage::Chat { message } => {
                                     let _ = tx.send(ServerMessage::Chat {
                                         username: username.clone(),
                                         message,
+                                        time: Some(Utc::now()),
                                     });
                                 }
                             },

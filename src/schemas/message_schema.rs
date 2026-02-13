@@ -1,4 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -10,7 +12,7 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
-    UserJoined { username: String },
-    Chat { username: String, message: String },
+    UserJoined { username: String, time: Option<DateTime<Utc>> },
+    Chat { username: String, message: String, time: Option<DateTime<Utc>> },
 }
 
