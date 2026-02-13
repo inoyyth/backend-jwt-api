@@ -1,7 +1,10 @@
 use crate::{
     handlers::upload_handler::upload_cloudinary, schemas::document_schema::CompletePayload,
+    utils::response::ApiResponse,
 };
-use axum::{Extension, extract::Multipart, response::IntoResponse};
+use axum::{Extension, Json, extract::Multipart, response::IntoResponse};
+use reqwest::StatusCode;
+use serde_json::{Value, json};
 use sqlx::MySqlPool;
 use stringcase::snake_case;
 use tokio::{fs, io::AsyncWriteExt};
@@ -34,7 +37,7 @@ pub async fn upload_chunk(mut multipart: Multipart) -> impl IntoResponse {
 pub async fn complete_upload(
     Extension(db): Extension<MySqlPool>,
     axum::Json(payload): axum::Json<CompletePayload>,
-) -> impl IntoResponse {
+) -> (StatusCode, Json<ApiResponse<Value>>) {
     let dir = format!("uploads/{}", payload.file_id);
     let output_path = format!(
         "uploads/{}-{}.{}",
@@ -53,7 +56,12 @@ pub async fn complete_upload(
     let mut read_dir = match tokio::fs::read_dir(&dir).await {
         Ok(read_dir) => read_dir,
         Err(_) => {
-            return "No upload directory found. Please upload chunks first.".into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(
+                    "No upload directory found. Please upload chunks first.",
+                )),
+            );
         }
     };
 
@@ -68,25 +76,51 @@ pub async fn complete_upload(
         output.write_all(&bytes).await.unwrap();
     }
 
-    // TODO: save to database
-
     // TODO: upload to cloudinary
     let file_for_upload = fs::File::open(&output_path).await.unwrap();
     let cloudinary_response = match upload_cloudinary(file_for_upload).await {
         Ok(response) => response,
         Err(e) => {
             println!("Cloudinary upload failed: {}", e);
-            return "Cloudinary upload failed".into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error("Cloudinary upload failed")),
+            );
         }
     };
+
     // Clean up temporary chunk directory and merged file
     tokio::fs::remove_dir_all(&dir).await.unwrap();
     tokio::fs::remove_file(&output_path).await.unwrap();
+
+    // TODO: save to database
+    let _ = match sqlx::query!(
+        "INSERT INTO documents (name, file_id) VALUES (?, ?)",
+        payload.name,
+        cloudinary_response.secure_url
+    )
+    .execute(&db)
+    .await
+    {
+        Ok(response) => response,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(&format!(
+                    "Failed to save document: {}",
+                    e
+                ))),
+            );
+        }
+    };
 
     println!(
         "Cloudinary upload successful: {}",
         cloudinary_response.secure_url
     );
 
-    "merged".into_response()
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success("Upload successful", json!({}))),
+    )
 }

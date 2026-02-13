@@ -15,12 +15,6 @@ pub struct CloudinaryResponse {
     pub format: String,
 }
 
-#[derive(Debug)]
-enum StringOrFile {
-    Str(String),
-    File(File),
-}
-
 fn generate_signature(params: &[(&str, String)], api_secret: &str) -> String {
     let mut sorted = params.to_vec();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
